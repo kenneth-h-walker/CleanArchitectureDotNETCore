@@ -1,0 +1,130 @@
+https://8thlight.com/blog/uncle-bob/2012/08/13/the-clean-architecture.html
+
+Scaffold-DbContext "Server=(localdb)\MSSQLLocalDB;Database=Bookstore;Trusted_Connection=True;MultipleActiveResultSets=true" Microsoft.EntityFrameworkCore.SqlServer -OutputDir Entities -Context BookstoreContext -ContextDir Entities
+
+Data Source=(localdb)\MSSQLLocalDB;Initial Catalog=master;Integrated Security=True;Connect Timeout=30;Encrypt=False;TrustServerCertificate=False;ApplicationIntent=ReadWrite;MultiSubnetFailover=False
+
+DemoBranch1: After:
+Creating initial projects
+	BookstoreIoC.WebUI
+	BookstoreIoC.Core
+	BookstoreIoC.Infrastructure
+	BookstoreIoC.Scaffold
+Scaffolding database to BookstoreIoC.Core.Entities for Author, Book, Order, OrderDetail 
+Pluralizing table names
+        public virtual DbSet<Author> Authors { get; set; }
+        public virtual DbSet<Book> Books { get; set; }
+        public virtual DbSet<Order> Orders { get; set; }
+        public virtual DbSet<OrderDetail> OrderDetails { get; set; }
+            modelBuilder.Entity<Author>().ToTable("Author");
+            modelBuilder.Entity<Book>().ToTable("Book");
+            modelBuilder.Entity<Order>().ToTable("Order");
+            modelBuilder.Entity<OrderDetail>().ToTable("OrderDetail");
+
+Startup.cs
+            services.AddDbContext<BookstoreContext>(options =>
+                options.UseSqlServer(
+                    "Server=(localdb)\\MSSQLLocalDB;Database=Bookstore;Trusted_Connection=True;MultipleActiveResultSets=true"));
+Scaffolding to BookstoreIoC.Scaffold the CRUD pages for Author, Book, Order, OrderDetail 
+
+DemoBranch2: After:
+Repository Pattern
+Add NuGet packages to Infrastructure
+	Microsoft.EntityFrameworkCore 2.1.3
+	Microsoft.EntityFrameworkCore.SqlServer 2.1.3
+	
+        protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+        {
+            if (!optionsBuilder.IsConfigured)
+            {
+                optionsBuilder.UseSqlServer(
+                    GlobalVars.Instance.Configuration.GetConnectionString("DefaultConnection"));
+            }
+        }
+            services.AddDbContext<BookstoreContext>(options =>
+                options.UseSqlServer(
+                    Configuration.GetConnectionString("DefaultConnection")));
+            services.AddScoped<IAuthorRepository, AuthorRepository>();
+
+Copy Authors pages from Scaffold
+	Inject AuthorsRepository in Authors pages
+
+appsettings.json
+  "ConnectionStrings": {
+    "DefaultConnection": "Server=(localdb)\\MSSQLLocalDB;Database=Bookstore;Trusted_Connection=True;MultipleActiveResultSets=true"
+  },
+
+Set Authors/Index as the startup page:
+_Layout.cshtml
+                <ul class="nav navbar-nav">
+                    <li><a asp-page="/Authors/Index">Home</a></li>
+                    <li><a asp-page="/Authors/Index">Bookstore</a></li>
+                    <li><a asp-page="/About">About</a></li>
+                    <li><a asp-page="/Contact">Contact</a></li>
+Startup.ConfigureServices()
+            services.AddMvc().SetCompatibilityVersion(CompatibilityVersion.Version_2_1)
+                .AddRazorPagesOptions(options => options.Conventions.AddPageRoute("/Authors/Index",""));
+Rename Pages\Index to Index.Original
+
+			
+DemoBranch3: After:
+Add BookstoreIoC.Factory project
+Internal scope for Infrastructure
+Remove references to Infrastructure
+
+public Startup(IConfiguration configuration)
+{
+	Configuration = configuration;
+	GlobalVars.Instance.Configuration = configuration;
+}
+
+namespace BookstoreIoC.Factory
+{
+    public class BookstoreIoCFactory : IBookstoreDacFactory
+    {
+        public IAuthorRepository CreateAuthorRepository()
+        {
+            BookstoreContext dbContext = new BookstoreContext();
+            IAuthorRepository repository = new AuthorRepository(dbContext);
+            return repository;
+        }
+
+    }
+}
+
+Startup.cs
+            // Register application services
+            services.AddSingleton<IBookstoreDacFactory>(new BookstoreIoCFactory());
+            services.AddScoped<IAuthorRepository>(provider =>
+            {
+                return provider.GetRequiredService<IBookstoreDacFactory>().CreateAuthorRepository();
+            });
+            //services.AddScoped<IAuthorRepository, AuthorRepository>();
+
+
+
+BookstoreIoC.Factory.AssemblyInfo.cs
+[assembly: InternalsVisibleTo("BookstoreIoC.Factory")]
+
+DemoBranch4: After:
+Dapper Author repository
+Author pages using IAuthorRepository
+
+Add DapperBookstoreDacFactory
+
+appsettings.json
+  "//": "BookstoreDataAccess must be: \"EntityFramework\" or \"Dapper\"",
+  "BookstoreDataAccess": "EntityFramework"
+
+            // Register application services
+            string bookstoreDataAccess = Configuration.GetValue<string>("BookstoreDataAccess");
+            if (bookstoreDataAccess == "EntityFramework")
+                services.AddSingleton<IBookstoreIoCFactory>(new EfBookstoreDacFactory());
+            else if (bookstoreDataAccess == "Dapper")
+                services.AddSingleton<IBookstoreIoCFactory>(new DapperBookstoreDacFactory());
+            else { throw new ArgumentException($"Improper BookstoreDataAccess configuration setting {bookstoreDataAccess}"); }
+            services.AddScoped<IAuthorRepository>(provider =>
+            {
+                return provider.GetRequiredService<IBookstoreIoCFactory>().CreateAuthorRepository();
+            });
+
